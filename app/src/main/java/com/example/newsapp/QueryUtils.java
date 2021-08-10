@@ -1,0 +1,217 @@
+package com.example.newsapp;
+
+import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+import android.os.Build;
+import android.text.TextUtils;
+import android.util.Log;
+
+import androidx.annotation.RequiresApi;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+
+public class QueryUtils {
+
+    /* Tag for the log messages */
+    private static final String LOG_TAG = QueryUtils.class.getSimpleName();
+
+    /**
+     * Create a private constructor because no one should ever create a {@link QueryUtils} object.
+     */
+    private QueryUtils() {
+    }
+
+    /**
+     * Ths method (function) for checking internet connection.
+     *
+     * @param context of the app.
+     * @return true if internet connection is present else return false
+     */
+    public static boolean isConnected(Context context) {
+        ConnectivityManager cm = (ConnectivityManager)
+                context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        assert cm != null;
+        NetworkInfo networkInfo = cm.getActiveNetworkInfo();
+        return (networkInfo != null && networkInfo.isConnected());
+    }
+
+    @RequiresApi(api = Build.VERSION_CODES.KITKAT)
+    public static List<News> fetchNewsData(String requestUrl) {
+        // Create URL object
+        URL url = createUrl(requestUrl);
+
+        // Perform HTTP request to the URL and receive a JSON response.
+        String jsonResponse = null;
+        try {
+            jsonResponse = makeHttpRequest(url);
+        } catch (IOException e) {
+            Log.e(LOG_TAG, "Problem making the HTTP request.", e);
+        }
+
+        // Extract relevant fields from the JSON response.
+        List<News> newsList;
+        newsList = extractResponseFromJson(jsonResponse);
+        // Return the list.
+        return newsList;
+    }
+
+    /**
+     * @param requestUrl is the given string url.
+     * @return the url object.
+     */
+    private static URL createUrl(String requestUrl) {
+        URL url = null;
+        try {
+            url = new URL(requestUrl);
+        } catch (MalformedURLException e) {
+            Log.e(LOG_TAG, "Problem building the URL", e);
+        }
+        return url;
+    }
+
+    @RequiresApi(api = Build.VERSION_CODES.KITKAT)
+    private static String makeHttpRequest(URL url) throws IOException {
+        String jsonResponse = "";
+
+        // if URL is null, return early.
+        if (url == null) {
+            return jsonResponse;
+        }
+
+        HttpURLConnection urlConnection = null;
+        InputStream inputStream = null;
+        try {
+            urlConnection = (HttpURLConnection) url.openConnection();
+            urlConnection.setReadTimeout(Constant.READ_TIMEOUT); // 10000 millisecond.
+            urlConnection.setConnectTimeout(Constant.CONNECT_TIMEOUT); // 15000 millisecond.
+            urlConnection.setRequestMethod(Constant.REQUEST_METHOD); // GET method.
+            urlConnection.connect();
+
+            // If the request is successful (code 200)
+            // Read the input stream and parse the response.
+            if (urlConnection.getResponseCode() == Constant.RESPONSE_CODE /*200*/) {
+                inputStream = urlConnection.getInputStream();
+                jsonResponse = readStreamResponse(inputStream);
+            } else {
+                Log.e(LOG_TAG, "Error response code: " + urlConnection.getResponseCode());
+            }
+        } catch (IOException e) {
+            Log.e(LOG_TAG, "Problem retrieving the News JSON results.", e);
+        } finally {
+            if (urlConnection != null) {
+                urlConnection.disconnect();
+            }
+            if (inputStream != null) {
+                inputStream.close();
+            }
+        }
+        return jsonResponse;
+    }
+
+    /**
+     * @param inputStream is the JSON stream bytes.
+     * @return the JSON stream to string.
+     * @throws IOException Problem retrieving the News JSON results.
+     */
+    @RequiresApi(api = Build.VERSION_CODES.KITKAT)
+    private static String readStreamResponse(InputStream inputStream) throws IOException {
+        StringBuilder output = new StringBuilder();
+        if (inputStream != null) {
+            InputStreamReader inputStreamReader = new InputStreamReader(inputStream,StandardCharsets.UTF_8);
+            BufferedReader reader = new BufferedReader(inputStreamReader);
+            String line = reader.readLine();
+            while (line != null) {
+                output.append(line);
+                line = reader.readLine();
+            }
+        }
+        return output.toString();
+    }
+
+    private static List<News> extractResponseFromJson(String newsJson) {
+        // if the JSON string is empty or null then return early.
+        if (TextUtils.isEmpty(newsJson)) {
+            return null;
+        }
+        // create an empty ArrayList that we can start adding news to
+        List<News> newsList = new ArrayList<>();
+
+        // Try to parse the JSON response string. If there's a problem with the way the JSON
+        // is formatted, a JSONException exception object will be thrown.
+        try {
+
+            String webTitle;
+            String sectionName;
+            String webPublicationDate;
+            String webUrl;
+            String thumbnail = "";
+            String author = "";
+            // Create a JSONObject from the JSON response string.
+            JSONObject baseJsonResponse = new JSONObject(newsJson);
+            // Extract the JSONObject associated with the key string "response"
+            JSONObject responseJsonObject = baseJsonResponse.getJSONObject(Constant.JSON_KEY_RESPONSE);
+            // Extract the JSONArray associated with the key string "results"
+            JSONArray resultsArray = responseJsonObject.getJSONArray(Constant.JSON_KEY_RESULTS);
+
+            /* For each element in the resultArray, create a {@Link News} object */
+            for (int i = 0; i < resultsArray.length(); i++) {
+                // Get a single newsList at index i
+                JSONObject currentNews = resultsArray.getJSONObject(i);
+                // Extract the value for the key called "webTitle"
+                webTitle = currentNews.getString(Constant.JSON_KEY_WEB_TITLE);
+                // Extract the value for the key called "sectionName"
+                sectionName = currentNews.getString(Constant.JSON_KEY_SECTION_NAME);
+                // Extract the value for the key called "webPublicationDate"
+                webPublicationDate = currentNews.getString(Constant.JSON_KEY_WEB_PUBLICATION_DATE);
+                // Extract the value for the key called "webUrl"
+                webUrl = currentNews.getString(Constant.JSON_KEY_WEB_URL);
+                // Extract the JSONObject for the key value "fields"
+                JSONObject thumbObj = currentNews.getJSONObject(Constant.JSON_KEY_FIELDS);
+                // Extract the thumbnail for the key value "thumbnail"
+                // Throw an exception if one or more thumbnail is missing
+                try {
+                    thumbnail = thumbObj.getString(Constant.JSON_KEY_THUMBNAIL);
+                } catch (JSONException e) {
+                    Log.e(LOG_TAG, "Missing one or more thumbnail JSONObject");
+                }
+                // Extract the JSONArray associated with the key "tags"
+                JSONArray tagsArray = currentNews.getJSONArray(Constant.JSON_KEY_TAGS);
+                if (tagsArray.length() > 0) {
+                    for (int j = 0; j < 1; j++) {
+                        // extract the value for the key "webTitle" (author)
+                        JSONObject authorObj = tagsArray.getJSONObject(j);
+                        try {
+                            author = authorObj.getString(Constant.JSON_KEY_AUTHOR);
+                        } catch (JSONException e) {
+                            Log.e(LOG_TAG, "Missing one or more author's name JSONObject");
+                        }
+                    }
+                }
+
+                // Create a new {@Link News} object
+                News news = new News(sectionName, webTitle, webPublicationDate, webUrl, author, thumbnail);
+                newsList.add(news);
+            }
+        } catch (JSONException e) {
+            // catch the exception here, so the app doesn't crash. Print a log message.
+            Log.e(LOG_TAG, "Problem parsing the news JSON results", e);
+        }
+        // Return the newsList
+        return newsList;
+    }
+
+}
